@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+
+import time
+import sys
+import yaml
+import expression
+import dpath.util
+from clint.arguments import Args
+from clint.textui import colored
+from tabulate import tabulate
+import numpy as np
+from clint.textui import progress
+import pandas as pd
+
+HELP="""
+jmaster - application for generation test datasets for ML
+Usage: jmaster (keys) (list of model YAML files)
+
+    Keys:
+        --exp ( jmaster expression )
+            Evaluate jmaster expression and display an output
+        --help
+            Display help
+"""
+
+def _expression(_exp):
+    functions = {
+        'int': int,
+        'range': range,
+        'abs':abs,
+        'sum':np.sum,
+        'random_normal': np.random.normal
+    }
+    parser = expression.Expression_Parser(functions=functions)
+    try:
+        return parser.parse(_exp)
+    except NameError:
+        print("Name error:",colored.red(_exp))
+        return None
+    except TypeError:
+        print("Type error:",colored.red(_exp))
+        return None
+    except SyntaxError:
+        print("Syntax error:",colored.red(_exp))
+        return None
+
+def help(namespace, param):
+    print(colored.cyan(HELP))
+    sys.exit(0)
+
+
+def exp(namespace, param):
+    for e in param:
+        _res = _expression(e)
+        if _res is None:
+            print(colored.red("Does not compute!"))
+            continue
+        print(colored.magenta(e), colored.white(" = "), colored.yellow(_res))
+    return namespace
+
+def model(namespace, models):
+    for m in dpath.util.get(namespace, "/models"):
+        model = dpath.util.get(namespace, "/models")[m]['model']
+        n_of_attrs = len(model['attrs'])
+        print(tabulate(
+            [["Model:", colored.yellow(m)],
+            ["Generating: ", colored.yellow("{} attributes".format(n_of_attrs))]]
+        ))
+        if n_of_attrs == 0:
+            return
+        data = pd.DataFrame()
+        with progress.Bar(label=m, expected_size=n_of_attrs) as bar:
+            last_val = 0
+            for e in model['attrs']:
+                _exp = list(e.values())[0]
+                _key = list(e.keys())[0]
+                bar.show(last_val)
+                last_val += 1
+                col = _expression(_exp)
+                if col is not None:
+                    data[_key] = col
+        if 'y' in model:
+            _exp = model['y']
+            print("Calculating Y: ", colored.green(_exp))
+            col = _expression(_exp)
+            if col is not None:
+                data['y'] = col
+            else:
+                print(colored.red("Failed"))
+        try:
+            print(colored.white("Save {}".format(model['fname'])))
+            data.to_csv(model['fname'], index=False)
+        except IOError:
+            print(colored.red("Can not save {}".format(model['fname'])))
+    return namespace
+
+def main():
+    namespace = {}
+    dpath.util.new(namespace, "/config/args", Args())
+    dpath.util.new(namespace, "/config/flags", dpath.util.get(namespace, "/config/args").flags)
+    dpath.util.new(namespace, "/config/files", dpath.util.get(namespace, "/config/args").files)
+    dpath.util.new(namespace, "/config/grouped", dpath.util.get(namespace, "/config/args").grouped)
+    dpath.util.new(namespace, "/models", {})
+    dpath.util.new(namespace, "/generated", {})
+    dpath.util.new(namespace, "/bin/help", help)
+    dpath.util.new(namespace, "/bin/exp", exp)
+    dpath.util.new(namespace, "/sbin/model", model)
+
+    files = dpath.util.get(namespace, "/config/files")
+    for f in files:
+        with open(f, 'r') as _f:
+            try:
+                y = yaml.safe_load(_f)
+            except yaml.YAMLError as exc:
+                continue
+            if 'model' not in y:
+                continue
+            _isGood = True
+            for i in ['fname', 'attrs', 'id', 'y']:
+                if i not in y['model']:
+                    print("Model {} no good: ".format(f), colored.red("{} attribute is missing".format(i)))
+                    _isGood = False
+                    break
+            if _isGood is not True:
+                continue
+            dpath.util.new(namespace, "/models/{}".format(y['model']['id']), y)
+    for f in dpath.util.get(namespace, "/config/flags").all:
+        try:
+            fun = dpath.util.get(namespace, "/bin/{}".format(f[2:].lower()))
+        except KeyError:
+            continue
+        except IndexError:
+            continue
+        param = dpath.util.get(namespace, "/config/grouped/{}".format(f))
+        if param[-1] in files:
+            param =  param[:-1]
+        namespace = fun(namespace, param)
+    if '--model' in dpath.util.get(namespace, "/config/flags").all:
+        models = dpath.util.get(namespace, "/config/grouped/{}".format('--model'))
+        if models[-1] in files:
+            models =  models[:-1]
+    else:
+        models = ['random']
+    fun = dpath.util.get(namespace, "/sbin/model")
+    fun(namespace, models)
+    return
+
+if __name__ == '__main__':
+    main()
