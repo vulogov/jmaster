@@ -3,10 +3,13 @@
 import time
 import sys
 import yaml
+import fnmatch
 import expression
+import posixpath
 import dpath.util
 from clint.arguments import Args
 from clint.textui import colored
+from clint.textui import puts, indent
 from tabulate import tabulate
 import numpy as np
 from clint.textui import progress
@@ -15,26 +18,79 @@ from sklearn import preprocessing
 
 HELP="""
 jmaster - application for generation test datasets for ML
-Usage: jmaster (keys) (list of model YAML files)
+Usage: jmaster (keys) --models (list of model YAML files)
 
     Keys:
+
         --exp ( jmaster expression )
             Evaluate jmaster expression and display an output
+        --output ( filename )
+            Set the final output to a file.
+            Default: output.csv
+        --oexp (list of expressions )
+            Performing computations with generated models and save result to
+            the file specified by "--output"
         --help
             Display help
+
 """
 
-def _expression(_exp, variables={}):
-    functions = {
-        'int': int,
-        'range': range,
-        'abs':abs,
-        'sum':np.sum,
-        'random_normal': np.random.normal,
-        'random_uniform': np.random.uniform,
-        'normalize': preprocessing.normalize
-    }
-    parser = expression.Expression_Parser(functions=functions, variables=variables)
+EXAMPLES = """
+    Examples:
+
+        1. jmaster test.yaml
+            Load model file "yest.yaml", generate test dataset and save the output
+            into a CSV file with the name secified in "fname" attribute of the model
+        2. jmaster --exp "sum(range(2,10,3))"
+            Perform evaluation of the expression and display the result to STDOUT
+        3. jmaster --output model.csv --oexp "merge(test1, test2)" test1.yaml test2.yaml
+            Load and generate models "test1.yaml" and "test2.yaml" and then perform
+            calculation with generated models "merge(test1, test2)" with saving result
+            into a file "model.csv"
+
+"""
+
+YAML = """
+# This is an example of the model file. The model begins
+# with node "model:"
+    model:
+      # ID of the model
+      id: test1
+      # Human-readable name of the model
+      name: "Test model"
+      # Name of the CSV file for storing generated test data
+      fname: test_1.csv
+      # Definition of the attributes of the model
+      attrs:
+        # Attribute name and expression for generation of the column
+        - a: "abs(random_normal(1, 12, 10))"
+        - b: "abs(random_normal(2, 8, 10))"
+      # Definition of the "y" column of the data
+      y: "abs(random_normal(0, 4, 10))"
+      # Non-mandatory post-processing expressions
+      postprocess:
+        - "normalize(data)"
+"""
+
+def _normalize(data):
+    _post = preprocessing.normalize(data)
+    _data = pd.DataFrame()
+    c = 0
+    for k in data:
+        _data[k] = _post[c]
+        c += 1
+    data = _data
+    return data
+
+def _merge_df(*datasets):
+    root = pd.DataFrame()
+    for d in datasets:
+        root = root.append(d)
+    return root
+
+
+def _anexpression(_exp, _fun, variables={}):
+    parser = expression.Expression_Parser(functions=_fun, variables=variables)
     try:
         return parser.parse(_exp)
     except NameError:
@@ -47,10 +103,50 @@ def _expression(_exp, variables={}):
         print("Syntax error:",colored.red(_exp))
         return None
 
+def _expression(_exp, variables={}):
+    functions = {
+        'int': int,
+        'range': range,
+        'abs':abs,
+        'sum':np.sum,
+        'random_normal': np.random.normal,
+        'random_uniform': np.random.uniform,
+        'normalize': _normalize
+    }
+    return _anexpression(_exp, functions, variables)
+
+def _outexpression(_exp, variables):
+    functions = {
+        "merge": _merge_df
+    }
+    res = _anexpression(_exp, functions, variables)
+    return res
+
+
 def help(namespace, param):
+    from pygments.formatters import TerminalFormatter
+    from pygments import highlight
+    from pygments.lexers.data import YamlLexer
     print(colored.cyan(HELP))
+    print(colored.white(EXAMPLES))
+    with indent(4):
+        puts("Example of the model file:\n")
+        with indent(4):
+            puts(highlight(YAML, YamlLexer(), TerminalFormatter()))
     sys.exit(0)
 
+def output(namespace, param):
+    try:
+        dpath.util.set(namespace, "/config/output", param[0])
+    except IndexError:
+        return namespace
+    print("Set output file: ", colored.magenta(param[0]))
+    return namespace
+
+def oexp(namespace, param):
+    dpath.util.set(namespace, "/config/output_exp", param)
+    print("Set output calculations: ", colored.magenta(param))
+    return namespace
 
 def exp(namespace, param):
     for e in param:
@@ -92,15 +188,10 @@ def model(namespace, models):
             else:
                 print(colored.red("Failed"))
         if 'postprocess' in model:
-            _exp = model['postprocess']
-            print("Postprocessing: ", colored.green(_exp))
-            _post = _expression(_exp, vars)
-            _data = pd.DataFrame()
-            c = 0
-            for k in data:
-                _data[k] = _post[c]
-                c += 1
-            data = _data
+            for _exp in model['postprocess']:
+                print("Postprocessing: ", colored.green(_exp))
+                data = _expression(_exp, vars)
+        dpath.util.new(namespace, "/generated/{}".format(m), data)
         try:
             print(colored.white("Save {}".format(model['fname'])))
             data.to_csv(model['fname'], index=False)
@@ -108,33 +199,54 @@ def model(namespace, models):
             print(colored.red("Can not save {}".format(model['fname'])))
     return namespace
 
+def calculate_output(namespace, params):
+    variables = {
+        'data': pd.DataFrame()
+    }
+    variables.update(dpath.util.get(namespace, "/generated"))
+    for f in params:
+        variables["data"] = _outexpression(f, variables)
+    return variables["data"]
+
 def main():
+    print(colored.white("Generating test datasets"))
     namespace = {}
     dpath.util.new(namespace, "/config/args", Args())
     dpath.util.new(namespace, "/config/flags", dpath.util.get(namespace, "/config/args").flags)
-    dpath.util.new(namespace, "/config/files", dpath.util.get(namespace, "/config/args").files)
     dpath.util.new(namespace, "/config/grouped", dpath.util.get(namespace, "/config/args").grouped)
+    dpath.util.new(namespace, "/config/output", "output.csv")
+    dpath.util.new(namespace, "/config/output_exp", [])
     dpath.util.new(namespace, "/models", {})
     dpath.util.new(namespace, "/generated", {})
     dpath.util.new(namespace, "/bin/help", help)
     dpath.util.new(namespace, "/bin/exp", exp)
+    dpath.util.new(namespace, "/bin/output", output)
+    dpath.util.new(namespace, "/bin/oexp", oexp)
     dpath.util.new(namespace, "/sbin/model", model)
+    dpath.util.new(namespace, "/sbin/output", calculate_output)
+    files = dpath.util.get(namespace, "/config/grouped")['--models'].all
+    files = [i for i in files if posixpath.exists(i) and posixpath.isfile(i)]
+    dpath.util.new(namespace, "/config/files", files)
 
-    files = dpath.util.get(namespace, "/config/files")
+    print("Considering", colored.green("{}".format(len(files))), "model(s)")
     for f in files:
         with open(f, 'r') as _f:
             try:
                 y = yaml.safe_load(_f)
             except yaml.YAMLError as exc:
                 continue
+            print(y)
             if 'model' not in y:
                 continue
             _isGood = True
-            for i in ['fname', 'attrs', 'id', 'y']:
+            for i in ['fname', 'attrs', 'id']:
                 if i not in y['model']:
                     print("Model {} no good: ".format(f), colored.red("{} attribute is missing".format(i)))
                     _isGood = False
                     break
+            for i in ['y']:
+                if i not in y['model']:
+                    print("Model {} may not be complete: ".format(f), colored.cyan("{} attribute is missing".format(i)))
             if _isGood is not True:
                 continue
             dpath.util.new(namespace, "/models/{}".format(y['model']['id']), y)
@@ -145,9 +257,9 @@ def main():
             continue
         except IndexError:
             continue
-        param = dpath.util.get(namespace, "/config/grouped/{}".format(f))
-        if param[-1] in files:
-            param =  param[:-1]
+        param = dpath.util.get(namespace, "/config/grouped/{}".format(f)).all
+        if len(files) > 0:
+            param = [i for i in param if i not in files]
         namespace = fun(namespace, param)
     if '--model' in dpath.util.get(namespace, "/config/flags").all:
         models = dpath.util.get(namespace, "/config/grouped/{}".format('--model'))
@@ -157,6 +269,14 @@ def main():
         models = ['random']
     fun = dpath.util.get(namespace, "/sbin/model")
     fun(namespace, models)
+    output_exp = dpath.util.get(namespace, "/config/output_exp")
+    if len(output_exp) != 0:
+        fname = output_exp = dpath.util.get(namespace, "/config/output")
+        print("Calculating output to: ", colored.green(fname))
+        fun = dpath.util.get(namespace, "/sbin/output")
+        data = fun(namespace, dpath.util.get(namespace, "/config/output_exp"))
+        print("Saving output to: ", colored.green(fname))
+        data.to_csv(fname, index=False)
     return
 
 if __name__ == '__main__':
