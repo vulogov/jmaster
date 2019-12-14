@@ -11,6 +11,7 @@ from tabulate import tabulate
 import numpy as np
 from clint.textui import progress
 import pandas as pd
+from sklearn import preprocessing
 
 HELP="""
 jmaster - application for generation test datasets for ML
@@ -23,15 +24,17 @@ Usage: jmaster (keys) (list of model YAML files)
             Display help
 """
 
-def _expression(_exp):
+def _expression(_exp, variables={}):
     functions = {
         'int': int,
         'range': range,
         'abs':abs,
         'sum':np.sum,
-        'random_normal': np.random.normal
+        'random_normal': np.random.normal,
+        'random_uniform': np.random.uniform,
+        'normalize': preprocessing.normalize
     }
-    parser = expression.Expression_Parser(functions=functions)
+    parser = expression.Expression_Parser(functions=functions, variables=variables)
     try:
         return parser.parse(_exp)
     except NameError:
@@ -69,6 +72,7 @@ def model(namespace, models):
         if n_of_attrs == 0:
             return
         data = pd.DataFrame()
+        vars = {'data': data}
         with progress.Bar(label=m, expected_size=n_of_attrs) as bar:
             last_val = 0
             for e in model['attrs']:
@@ -76,17 +80,27 @@ def model(namespace, models):
                 _key = list(e.keys())[0]
                 bar.show(last_val)
                 last_val += 1
-                col = _expression(_exp)
+                col = _expression(_exp, vars)
                 if col is not None:
                     data[_key] = col
         if 'y' in model:
             _exp = model['y']
             print("Calculating Y: ", colored.green(_exp))
-            col = _expression(_exp)
+            col = _expression(_exp, vars)
             if col is not None:
                 data['y'] = col
             else:
                 print(colored.red("Failed"))
+        if 'postprocess' in model:
+            _exp = model['postprocess']
+            print("Postprocessing: ", colored.green(_exp))
+            _post = _expression(_exp, vars)
+            _data = pd.DataFrame()
+            c = 0
+            for k in data:
+                _data[k] = _post[c]
+                c += 1
+            data = _data
         try:
             print(colored.white("Save {}".format(model['fname'])))
             data.to_csv(model['fname'], index=False)

@@ -8,4 +8,6 @@ model:
     - c: "abs(random_normal(3, 2, 10))"
     - d: "abs(random_normal(10, 15, 10))"
     - e: "abs(random_normal(6, 8, 10))"
+    - f: "abs(random_uniform(4, 6, 10))"
   y: "abs(random_normal(0, 4, 10))"
+  postprocess: "normalize(data)"
