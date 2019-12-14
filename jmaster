@@ -6,15 +6,19 @@ import yaml
 import fnmatch
 import expression
 import posixpath
+import os.path
 import dpath.util
 from clint.arguments import Args
 from clint.textui import colored
 from clint.textui import puts, indent
+from clint.textui import progress
 from tabulate import tabulate
 import numpy as np
-from clint.textui import progress
 import pandas as pd
 from sklearn import preprocessing
+import seaborn as sns
+import matplotlib.pyplot as plt
+sns.set()
 
 HELP="""
 jmaster - application for generation test datasets for ML
@@ -122,6 +126,14 @@ def _outexpression(_exp, variables):
     res = _anexpression(_exp, functions, variables)
     return res
 
+def _mk_heatmap(namespace, fname, data):
+    data.reset_index(inplace=True, drop=True)
+    plot = sns.heatmap(data, annot=True, linewidths=.5, cmap="coolwarm")
+    png_fname = os.path.splitext(fname)[0]+'.png'
+    fig = plot.get_figure()
+    fig.savefig(png_fname)
+    fig.clf()
+
 
 def help(namespace, param):
     from pygments.formatters import TerminalFormatter
@@ -192,9 +204,11 @@ def model(namespace, models):
                 print("Postprocessing: ", colored.green(_exp))
                 data = _expression(_exp, vars)
         dpath.util.new(namespace, "/generated/{}".format(m), data)
+        data.reset_index()
         try:
             print(colored.white("Save {}".format(model['fname'])))
             data.to_csv(model['fname'], index=False)
+            _mk_heatmap(namespace, model['fname'], data)
         except IOError:
             print(colored.red("Can not save {}".format(model['fname'])))
     return namespace
@@ -235,7 +249,6 @@ def main():
                 y = yaml.safe_load(_f)
             except yaml.YAMLError as exc:
                 continue
-            print(y)
             if 'model' not in y:
                 continue
             _isGood = True
@@ -275,8 +288,10 @@ def main():
         print("Calculating output to: ", colored.green(fname))
         fun = dpath.util.get(namespace, "/sbin/output")
         data = fun(namespace, dpath.util.get(namespace, "/config/output_exp"))
+        data.reset_index()
         print("Saving output to: ", colored.green(fname))
         data.to_csv(fname, index=False)
+        _mk_heatmap(namespace, fname, data)
     return
 
 if __name__ == '__main__':
