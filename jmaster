@@ -186,27 +186,25 @@ def tsmodel(namespace, params):
     fname = os.path.splitext(fname)[0]
     for data in df:
         vars = {'data': data, 'shape':data.shape}
-        with progress.Bar(label=params[c], expected_size=vars['shape'][0]) as bar:
-            for m in models:
-                print("Applying",colored.green(m),"on", colored.green(params[c]))
-                _d = {}
-                for e in models[m]['model']["attrs"]:
-                    _exp = list(e.values())[0]
-                    _key = list(e.keys())[0]
-                    _mul = _expression(_exp, vars)
-                    _d[_key] = _mul
-                if "y" in models[m]['model']:
-                    _d["y"] = _expression(models[m]['model']["y"], vars)
-                for _ts_step in range(0, data.shape[1]+1):
-                    for _col_name in _d:
-                        data[_col_name] = data[_col_name] * _d[_col_name][_ts_step]
-                    if 'y' in data:
-                        data["y"] = data["y"] * _d["y"][_ts_step]
-                    _current_fname = "{}_{}_{}.csv".format(fname, c, _ts_step)
-                    data.to_csv(_current_fname, index=False)
-                    _mk_heatmap(namespace, _current_fname, data)
-                    print("Saving",colored.green(_current_fname))
-            bar.show(c)
+        for m in models:
+            print("Applying",colored.green(m),"on", colored.green(params[c]))
+            _d = {}
+            for e in models[m]['model']["attrs"]:
+                _exp = list(e.values())[0]
+                _key = list(e.keys())[0]
+                _mul = _expression(_exp, vars)
+                _d[_key] = _mul
+            if "y" in models[m]['model']:
+                _d["y"] = _expression(models[m]['model']["y"], vars)
+            for _ts_step in range(0, data.shape[1]+1):
+                for _col_name in _d:
+                    data[_col_name] = data[_col_name] * _d[_col_name][_ts_step]
+                if 'y' in data:
+                    data["y"] = data["y"] * _d["y"][_ts_step]
+                _current_fname = "{}_{}_{}.csv".format(fname, c, _ts_step)
+                data.to_csv(_current_fname, index=False)
+                _mk_heatmap(namespace, _current_fname, data)
+                print("Saving",colored.green(_current_fname))
         c += 1
     return namespace
 
