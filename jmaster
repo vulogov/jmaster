@@ -37,6 +37,10 @@ Usage: jmaster (keys) --models (list of model YAML files)
         --ts (list of files)
             The models will be a recalculation of preloaded files. Size of the
             attribute will define the number of new data sets
+        --op operator
+            Operator which will be applicable to the columns in --ts mode
+            Default: multiplication
+            Possible options: multiply, plus, minus, divide
         --help
             Display help
 
@@ -57,7 +61,8 @@ EXAMPLES = """
         4.  jmaster --models test.yaml --ts model.csv
             Load data from "model.csv" and model from "test.yaml" and produce new
             series of the data, derived from preloaded data and computations of the
-            model
+            model. Series of data generated from the model, is applying to original data as
+            through operators.
 
 """
 
@@ -117,9 +122,14 @@ def _anexpression(_exp, _fun, variables={}):
 def _expression(_exp, variables={}):
     functions = {
         'int': int,
-        'range': range,
+        'range': np.arange,
         'abs':abs,
         'sum':np.sum,
+        'sin':np.sin,
+        'cos':np.cos,
+        'log':np.log,
+        'log10':np.log10,
+        'sqrt':np.sqrt,
         'random_normal': np.random.normal,
         'random_uniform': np.random.uniform,
         'normalize': _normalize
@@ -184,10 +194,12 @@ def tsmodel(namespace, params):
     models = dpath.util.get(namespace, "/models")
     fname = dpath.util.get(namespace, "/config/output")
     fname = os.path.splitext(fname)[0]
+    op = dpath.util.get(namespace, "/config/op")
+    op_fun = dpath.util.get(namespace, "/sbin/op")[op]
     for data in df:
         vars = {'data': data, 'shape':data.shape}
         for m in models:
-            print("Applying",colored.green(m),"on", colored.green(params[c]))
+            print("Applying",colored.green(m),"on", colored.green(params[c]), "with",colored.green(op))
             _d = {}
             for e in models[m]['model']["attrs"]:
                 _exp = list(e.values())[0]
@@ -200,7 +212,8 @@ def tsmodel(namespace, params):
                 for _col_name in _d:
                     data[_col_name] = data[_col_name] * _d[_col_name][_ts_step]
                 if 'y' in data:
-                    data["y"] = data["y"] * _d["y"][_ts_step]
+                    #data["y"] = data["y"] * _d["y"][_ts_step]
+                    data["y"] = op_fun(data["y"], _d["y"][_ts_step])
                 _current_fname = "{}_{}_{}.csv".format(fname, c, _ts_step)
                 data.to_csv(_current_fname, index=False)
                 _mk_heatmap(namespace, _current_fname, data)
@@ -290,6 +303,7 @@ def main():
     dpath.util.new(namespace, "/config/grouped", dpath.util.get(namespace, "/config/args").grouped)
     dpath.util.new(namespace, "/config/output", "output.csv")
     dpath.util.new(namespace, "/config/output_exp", [])
+    dpath.util.new(namespace, "/config/op", 'multiply')
     dpath.util.new(namespace, "/models", {})
     dpath.util.new(namespace, "/generated", {})
     dpath.util.new(namespace, "/bin/help", help)
@@ -298,11 +312,22 @@ def main():
     dpath.util.new(namespace, "/bin/oexp", oexp)
     dpath.util.new(namespace, "/sbin/model", model)
     dpath.util.new(namespace, "/sbin/ts", tsmodel)
+    dpath.util.new(namespace, "/sbin/op", {'multiply':np.multiply, 'plus': np.add, 'minus':np.subtract, 'divide': np.divide})
     dpath.util.new(namespace, "/sbin/output", calculate_output)
     files = get_params(namespace, 'models')
     ts = get_params(namespace, 'ts')
     files = [i for i in files if posixpath.exists(i) and posixpath.isfile(i)]
     ts = [i for i in ts if posixpath.exists(i) and posixpath.isfile(i)]
+    op = get_params(namespace, 'op')
+    if len(op) == 0:
+        op = 'multiply'
+    else:
+        op = op[0]
+        if op not in dpath.util.get(namespace, "/sbin/op"):
+            print(colored.red("Can not recognize operation for --ts mode: {}".format(op)))
+            print(colored.red("Valid options are: {}".format(list(dpath.util.get(namespace, "/sbin/op").keys()))))
+            return
+    dpath.util.set(namespace, "/config/op", op)
     dpath.util.new(namespace, "/config/ts", ts)
     dpath.util.new(namespace, "/config/files", files)
 
