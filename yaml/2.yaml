@@ -1,0 +1,12 @@
+model:
+  id: test2
+  name: "Test model #2"
+  fname: test_2.csv
+  attrs:
+    - a: "abs(random_normal(1, 12, 10))"
+    - b: "abs(random_normal(2, 8, 10))"
+    - c: "abs(random_normal(3, 2, 10))"
+    - d: "abs(random_normal(10, 15, 10))"
+    - e: "abs(random_normal(6, 8, 10))"
+    - f: "abs(random_uniform(4, 6, 10))"
+  y: "abs(random_normal(0, 4, 10))"

@@ -1,0 +1,12 @@
+model:
+  id: test2_model
+  name: "A model for --ts experiments"
+  fname: test_2_1.csv
+  attrs:
+    - a: "random_normal(0, 1, 10)"
+    - b: "random_normal(2, 4, 10)"
+    - c: "random_normal(-1, 1, 10)"
+    - d: "random_normal(-2, 0, 10)"
+    - e: "random_normal(0, 3, 10)"
+    - f: "random_uniform(1, 2, 10)"
+  y: "random_normal(-1, 1, 10)"

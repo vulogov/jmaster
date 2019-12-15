@@ -34,6 +34,9 @@ Usage: jmaster (keys) --models (list of model YAML files)
         --oexp (list of expressions )
             Performing computations with generated models and save result to
             the file specified by "--output"
+        --ts (list of files)
+            The models will be a recalculation of preloaded files. Size of the
+            attribute will define the number of new data sets
         --help
             Display help
 
@@ -42,15 +45,19 @@ Usage: jmaster (keys) --models (list of model YAML files)
 EXAMPLES = """
     Examples:
 
-        1. jmaster test.yaml
+        1. jmaster --models test.yaml
             Load model file "yest.yaml", generate test dataset and save the output
             into a CSV file with the name secified in "fname" attribute of the model
         2. jmaster --exp "sum(range(2,10,3))"
             Perform evaluation of the expression and display the result to STDOUT
-        3. jmaster --output model.csv --oexp "merge(test1, test2)" test1.yaml test2.yaml
+        3. jmaster --output model.csv --oexp "merge(test1, test2)" --models test1.yaml test2.yaml
             Load and generate models "test1.yaml" and "test2.yaml" and then perform
             calculation with generated models "merge(test1, test2)" with saving result
             into a file "model.csv"
+        4.  jmaster --models test.yaml --ts model.csv
+            Load data from "model.csv" and model from "test.yaml" and produce new
+            series of the data, derived from preloaded data and computations of the
+            model
 
 """
 
@@ -128,7 +135,7 @@ def _outexpression(_exp, variables):
 
 def _mk_heatmap(namespace, fname, data):
     data.reset_index(inplace=True, drop=True)
-    plot = sns.heatmap(data, annot=True, linewidths=.5, cmap="coolwarm")
+    plot = sns.heatmap(data, annot=True, linewidths=.5, cmap="coolwarm", fmt=".1f")
     png_fname = os.path.splitext(fname)[0]+'.png'
     fig = plot.get_figure()
     fig.savefig(png_fname)
@@ -169,6 +176,40 @@ def exp(namespace, param):
         print(colored.magenta(e), colored.white(" = "), colored.yellow(_res))
     return namespace
 
+def tsmodel(namespace, params):
+    df = []
+    for i in params:
+        df.append(pd.read_csv(i))
+    c = 0
+    models = dpath.util.get(namespace, "/models")
+    fname = dpath.util.get(namespace, "/config/output")
+    fname = os.path.splitext(fname)[0]
+    for data in df:
+        vars = {'data': data, 'shape':data.shape}
+        with progress.Bar(label=params[c], expected_size=vars['shape'][0]) as bar:
+            for m in models:
+                print("Applying",colored.green(m),"on", colored.green(params[c]))
+                _d = {}
+                for e in models[m]['model']["attrs"]:
+                    _exp = list(e.values())[0]
+                    _key = list(e.keys())[0]
+                    _mul = _expression(_exp, vars)
+                    _d[_key] = _mul
+                if "y" in models[m]['model']:
+                    _d["y"] = _expression(models[m]['model']["y"], vars)
+                for _ts_step in range(0, data.shape[1]+1):
+                    for _col_name in _d:
+                        data[_col_name] = data[_col_name] * _d[_col_name][_ts_step]
+                    if 'y' in data:
+                        data["y"] = data["y"] * _d["y"][_ts_step]
+                    _current_fname = "{}_{}_{}.csv".format(fname, c, _ts_step)
+                    data.to_csv(_current_fname, index=False)
+                    _mk_heatmap(namespace, _current_fname, data)
+                    print("Saving",colored.green(_current_fname))
+            bar.show(c)
+        c += 1
+    return namespace
+
 def model(namespace, models):
     for m in dpath.util.get(namespace, "/models"):
         model = dpath.util.get(namespace, "/models")[m]['model']
@@ -199,10 +240,14 @@ def model(namespace, models):
                 data['y'] = col
             else:
                 print(colored.red("Failed"))
+        else:
+            print("Calculating Y: ", colored.cyan("Not defined in model"))
         if 'postprocess' in model:
             for _exp in model['postprocess']:
                 print("Postprocessing: ", colored.green(_exp))
                 data = _expression(_exp, vars)
+        else:
+            print("Postprocessing: ", colored.green("Not defined"))
         dpath.util.new(namespace, "/generated/{}".format(m), data)
         data.reset_index()
         try:
@@ -222,6 +267,23 @@ def calculate_output(namespace, params):
         variables["data"] = _outexpression(f, variables)
     return variables["data"]
 
+def get_params(namespace, name):
+    try:
+        params = dpath.util.get(namespace, "/config/grouped")['--{}'.format(name)].all
+    except KeyError:
+        params = []
+    return params
+
+def execute_fun(namespace, name, param):
+    n = "/sbin/{}".format(name)
+    try:
+        print(colored.white("Executing "), colored.green("{}".format(n)))
+        fun = dpath.util.get(namespace, n)
+    except KeyError:
+        print(colored.red("Can not excute {}".format(n)))
+    namespace = fun(namespace, param)
+    return namespace
+
 def main():
     print(colored.white("Generating test datasets"))
     namespace = {}
@@ -237,9 +299,13 @@ def main():
     dpath.util.new(namespace, "/bin/output", output)
     dpath.util.new(namespace, "/bin/oexp", oexp)
     dpath.util.new(namespace, "/sbin/model", model)
+    dpath.util.new(namespace, "/sbin/ts", tsmodel)
     dpath.util.new(namespace, "/sbin/output", calculate_output)
-    files = dpath.util.get(namespace, "/config/grouped")['--models'].all
+    files = get_params(namespace, 'models')
+    ts = get_params(namespace, 'ts')
     files = [i for i in files if posixpath.exists(i) and posixpath.isfile(i)]
+    ts = [i for i in ts if posixpath.exists(i) and posixpath.isfile(i)]
+    dpath.util.new(namespace, "/config/ts", ts)
     dpath.util.new(namespace, "/config/files", files)
 
     print("Considering", colored.green("{}".format(len(files))), "model(s)")
@@ -271,17 +337,11 @@ def main():
         except IndexError:
             continue
         param = dpath.util.get(namespace, "/config/grouped/{}".format(f)).all
-        if len(files) > 0:
-            param = [i for i in param if i not in files]
         namespace = fun(namespace, param)
-    if '--model' in dpath.util.get(namespace, "/config/flags").all:
-        models = dpath.util.get(namespace, "/config/grouped/{}".format('--model'))
-        if models[-1] in files:
-            models =  models[:-1]
+    if len(ts) > 0:
+        namespace = execute_fun(namespace, "ts", ts)
     else:
-        models = ['random']
-    fun = dpath.util.get(namespace, "/sbin/model")
-    fun(namespace, models)
+        namespace = execute_fun(namespace, "model", files)
     output_exp = dpath.util.get(namespace, "/config/output_exp")
     if len(output_exp) != 0:
         fname = output_exp = dpath.util.get(namespace, "/config/output")
