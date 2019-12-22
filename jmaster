@@ -123,6 +123,9 @@ def _anexpression(_exp, _fun, variables={}):
 def _expression(_exp, variables={}):
     functions = {
         'int': int,
+        'odd': lambda x: True if x % 2 == 0 else False,
+        'even': lambda x: True if x % 2 == 1 else False,
+        'div2': lambda x: x % 2,
         'range': np.arange,
         'abs':abs,
         'sum':np.sum,
