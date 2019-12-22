@@ -8,6 +8,7 @@ import expression
 import posixpath
 import os.path
 import dpath.util
+import hy
 from clint.arguments import Args
 from clint.textui import colored
 from clint.textui import puts, indent
@@ -136,6 +137,17 @@ def _expression(_exp, variables={}):
     }
     return _anexpression(_exp, functions, variables)
 
+def _lispex(_exp_list, vars):
+    vars['np'] = np
+    out = {}
+    for k in _exp_list:
+        _key = list(k.keys())[0]
+        _value = k[_key]
+        expr = hy.read_str(_value)
+        vars[_key] = hy.eval(expr, vars)
+        out[_key] = vars[_key]
+    return out
+
 def _outexpression(_exp, variables):
     functions = {
         "merge": _merge_df
@@ -150,7 +162,23 @@ def _mk_heatmap(namespace, fname, data):
     fig = plot.get_figure()
     fig.savefig(png_fname)
     fig.clf()
+    plot = sns.catplot(kind="box", data=data)
+    png_fname = os.path.splitext(fname)[0]+"_cat"+'.png'
+    plot.savefig(png_fname)
 
+def _load_vars_from_model(namespace, model, vars):
+    if 'variables' not in model['model']:
+        model['model']['variables'] = []
+    if 'pre_func' not in model['model']:
+        model['model']['pre_func'] = []
+    if 'post_func' not in model['model']:
+        model['model']['post_func'] = []
+    _lispex(model['model']['pre_func'], vars)
+    for v in model['model']['variables']:
+        _key = list(v.keys())[0]
+        _value = v[_key]
+        vars[_key] = _expression(_value, vars)
+    _lispex(model['model']['post_func'], vars)
 
 def help(namespace, param):
     from pygments.formatters import TerminalFormatter
@@ -196,12 +224,16 @@ def tsmodel(namespace, params):
     fname = os.path.splitext(fname)[0]
     op = dpath.util.get(namespace, "/config/op")
     op_fun = dpath.util.get(namespace, "/sbin/op")[op]
+    vars = {'data': data, 'shape':data.shape}
     for data in df:
-        vars = {'data': data, 'shape':data.shape}
         for m in models:
             print("Applying",colored.green(m),"on", colored.green(params[c]), "with",colored.green(op))
             _d = {}
+            if 'fun' in models[m]['model']:
+                out = _lispex(models[m]['model']["fun"], vars)
+                _d.merge(out)
             for e in models[m]['model']["attrs"]:
+                _load_vars_from_model(namespace, models[m], vars)
                 _exp = list(e.values())[0]
                 _key = list(e.keys())[0]
                 _mul = _expression(_exp, vars)
@@ -210,9 +242,8 @@ def tsmodel(namespace, params):
                 _d["y"] = _expression(models[m]['model']["y"], vars)
             for _ts_step in range(0, data.shape[1]+1):
                 for _col_name in _d:
-                    data[_col_name] = data[_col_name] * _d[_col_name][_ts_step]
+                    data[_col_name] = op_fun(data[_col_name],_d[_col_name][_ts_step])
                 if 'y' in data:
-                    #data["y"] = data["y"] * _d["y"][_ts_step]
                     data["y"] = op_fun(data["y"], _d["y"][_ts_step])
                 _current_fname = "{}_{}_{}.csv".format(fname, c, _ts_step)
                 data.to_csv(_current_fname, index=False)
@@ -233,8 +264,13 @@ def model(namespace, models):
             return
         data = pd.DataFrame()
         vars = {'data': data}
+        _load_vars_from_model(namespace, dpath.util.get(namespace, "/models")[m], vars)
         with progress.Bar(label=m, expected_size=n_of_attrs) as bar:
             last_val = 0
+            if 'fun' in model:
+                out = _lispex(model["fun"], vars)
+                for k in out:
+                    data[k] = out[k]
             for e in model['attrs']:
                 _exp = list(e.values())[0]
                 _key = list(e.keys())[0]
