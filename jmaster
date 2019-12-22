@@ -136,7 +136,7 @@ def _expression(_exp, variables={}):
         'sqrt':np.sqrt,
         'random_normal': np.random.normal,
         'random_uniform': np.random.uniform,
-        'normalize': _normalize
+        'normalize': lambda x: x / np.linalg.norm(x)
     }
     return _anexpression(_exp, functions, variables)
 
