@@ -3,21 +3,17 @@ model:
   name: "Test model #3"
   fname: test_3.csv
   pre_func:
-    - g: (.random.randint np
-         0 255 10)
-  post_func:
-    - h: (.random.randint np 0 2 10)
+    - tenBytes: (.random.randint np
+         0 255 10 :dtype "B")
+    - upper: (.random.randint np 6 10)
+    - lower: (.random.randint np 1 5)
   variables:
-    - a: "abs(random_normal(1, 12, 10))"
+    - a: "abs(random_normal(lower, upper, 10))"
+    - upperLogic: int(2)
+  post_func:
+    - someLogic: (.random.randint np 0 upperLogic 10)
   attrs:
-    - a: "a"
-    - b: "abs(random_normal(2, 8, 10))"
-    - c: "abs(random_normal(3, 2, 10))"
-    - d: "abs(random_normal(10, 15, 10))"
-    - e: "abs(random_normal(6, 8, 10))"
-    - f: "abs(random_uniform(4, 6, 10))"
-    - g: g
-    - h: h
+    - bytesDistribution: normalize(tenBytes)
+  "y": a / tenBytes
   fun:
-    - i: (.random.randint np 10 15 10)
-  y: "abs(random_normal(0, 4, 10))"
+    - A: (* someLogic 2)

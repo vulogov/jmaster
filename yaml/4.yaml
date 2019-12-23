@@ -1,0 +1,8 @@
+model:
+  id: test4
+  name: "Test model #4"
+  fname: test_4.csv
+  variables:
+    - a: "abs(random_uniform(0, 255, 10))"
+  attrs:
+    - a: "normalize(a)"

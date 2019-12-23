@@ -258,7 +258,11 @@ def tsmodel(namespace, params):
 def model(namespace, models):
     for m in dpath.util.get(namespace, "/models"):
         model = dpath.util.get(namespace, "/models")[m]['model']
-        n_of_attrs = len(model['attrs'])
+        if 'fun' in model:
+            n_of_fun = len(model['fun'])
+        else:
+            n_of_fun = 0
+        n_of_attrs = len(model['attrs']) + n_of_fun
         print(tabulate(
             [["Model:", colored.yellow(m)],
             ["Generating: ", colored.yellow("{} attributes".format(n_of_attrs))]]
