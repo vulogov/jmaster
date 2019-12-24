@@ -9,6 +9,10 @@ import posixpath
 import os.path
 import dpath.util
 import hy
+import keras
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.utils import to_categorical
 from clint.arguments import Args
 from clint.textui import colored
 from clint.textui import puts, indent
@@ -45,6 +49,8 @@ Usage: jmaster (keys) --models (list of model YAML files)
             Possible options: multiply, plus, minus, divide
         --split float
             Define test/train split ratio
+        --target name
+            Set the name for the Y target in training set
         --help
             Display help
 
@@ -186,6 +192,82 @@ def _load_vars_from_model(namespace, model, vars):
         vars[_key] = _expression(_value, vars)
     _lispex(model['model']['post_func'], vars)
 
+def _train_keras(namespace, model, fname, data):
+    print(colored.white("Building KERAS model"))
+    tts = dpath.util.get(namespace, "/config/train_test_split")
+    target = dpath.util.get(namespace, "/config/target_column")
+    if 'keras' not in model:
+        print("Error building Keras ML. model not defined: ", colored.red(model['name']))
+        return namespace
+    keras_model = model['keras']
+    random_state = keras_model.get('random_state', dpath.util.get(namespace, "/config/random_state"))
+    if target not in data:
+        print("Error building Keras ML. Target not existing: ", colored.red(target))
+        return namespace
+    target = [target,]
+    predictors = list(set(list(data.columns))-set(target))
+    data[predictors] = keras.utils.normalize(data[predictors])
+    X = data[predictors].values
+    y = data[target].values
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=tts, random_state=40)
+    layers = list(keras_model.get('layers', {}).keys())
+    layers.sort()
+    l = keras_model.get('layers', {})
+    model = Sequential()
+    ln = 0
+    isOK = True
+    for layer in layers:
+        ld = l[layer]
+        lv = {}
+        for k in ld:
+            _k = list(k.keys())[0]
+            _v = k[_k]
+            lv[_k] = _v
+        if lv.get('type', 'Dense') == 'Dense':
+            if ln == 0:
+                model.add(Dense(lv.get('n', 100), activation=lv.get('activation', 'relu'), input_dim=len(predictors)))
+            else:
+                model.add(Dense(lv.get('n', 100), activation=lv.get('activation', 'relu')))
+        else:
+            print("Error building Keras ML. Unknown layer type: ", colored.red(lv.get('type', 'Dense')))
+            isOK = False
+            continue
+        ln += 1
+    if isOK is not True:
+        print(colored.red("Building KERAS model unsuccesful"))
+        return namespace
+    y_train = to_categorical(y_train)
+    y_test = to_categorical(y_test)
+    count_classes = y_test.shape[1]
+    print("Number of the target classes: ", colored.magenta(count_classes))
+    compile_opt = {}
+    for k in keras_model.get("compile", {}):
+        _k = list(k.keys())[0]
+        _v = k[_k]
+        compile_opt[_k] = _v
+    optimizer = compile_opt.get('optimizer', 'adam')
+    loss = compile_opt.get('loss', 'categorical_crossentropy')
+    metrics = compile_opt.get('metrics', ['accuracy'])
+    print(colored.white("Compiling model"))
+    model.compile(optimizer=optimizer,
+              loss=loss,
+              metrics=metrics)
+    print(colored.white("Training model"))
+    model.fit(X_train, y_train, epochs=keras_model.get("epochs", 20))
+    pred_train= model.predict(X_train)
+    scores = model.evaluate(X_train, y_train, verbose=0)
+    print('Accuracy on training data: ', colored.green(scores[1]))
+    print('Error on training data: ', colored.green(1-scores[1]))
+    pred_test= model.predict(X_test)
+    scores2 = model.evaluate(X_test, y_test, verbose=0)
+    print('Accuracy on test data: ', colored.green(scores2[1]))
+    print('Error on test data: ', colored.green(1-scores2[1]))
+    fname = os.path.splitext(fname)[0]+'.h5'
+    print('Saving KERAS model: ', colored.green(fname))
+    model.save(fname)
+
+
+
 def _train_test_split(namespace, fname, data):
     tts = dpath.util.get(namespace, "/config/train_test_split")
     _fname = os.path.splitext(fname)[0]
@@ -194,7 +276,7 @@ def _train_test_split(namespace, fname, data):
     train, test = train_test_split(data, test_size=tts)
     print("Saving training: ", colored.green(_fname_train))
     train.to_csv(_fname_train, index=False)
-    print("Saving testing: ", colored.green(_fname_train))
+    print("Saving testing: ", colored.green(_fname_test))
     test.to_csv(_fname_test, index=False)
 
 
@@ -225,6 +307,14 @@ def split(namespace, param):
     except IndexError:
         return namespace
     print("Set train/test split to: ", colored.magenta(param[0]))
+    return namespace
+
+def target(namespace, param):
+    try:
+        dpath.util.set(namespace, "/config/target_column", param[0])
+    except IndexError:
+        return namespace
+    print("Set target column to: ", colored.magenta(param[0]))
     return namespace
 
 def oexp(namespace, param):
@@ -338,6 +428,7 @@ def model(namespace, models):
             data.to_csv(model['fname'], index=False)
             _mk_heatmap(namespace, model['fname'], data)
             _train_test_split(namespace, model['fname'], data)
+            _train_keras(namespace, model, model['fname'], data)
         except IOError:
             print(colored.red("Can not save {}".format(model['fname'])))
     return namespace
@@ -378,6 +469,8 @@ def main():
     dpath.util.new(namespace, "/config/output_exp", [])
     dpath.util.new(namespace, "/config/op", 'multiply')
     dpath.util.new(namespace, "/config/train_test_split", 0.2)
+    dpath.util.new(namespace, "/config/target_column", "y")
+    dpath.util.new(namespace, "/config/random_state", 40)
     dpath.util.new(namespace, "/models", {})
     dpath.util.new(namespace, "/generated", {})
     dpath.util.new(namespace, "/bin/help", help)
@@ -386,6 +479,7 @@ def main():
     dpath.util.new(namespace, "/bin/oexp", oexp)
     dpath.util.new(namespace, "/bin/oexp", oexp)
     dpath.util.new(namespace, "/bin/split", split)
+    dpath.util.new(namespace, "/bin/target", target)
     dpath.util.new(namespace, "/sbin/model", model)
     dpath.util.new(namespace, "/sbin/ts", tsmodel)
     dpath.util.new(namespace, "/sbin/op", {'multiply':np.multiply, 'plus': np.add, 'minus':np.subtract, 'divide': np.divide})
