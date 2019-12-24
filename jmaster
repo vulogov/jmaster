@@ -17,6 +17,7 @@ from tabulate import tabulate
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
+from sklearn.model_selection import train_test_split
 import seaborn as sns
 import matplotlib.pyplot as plt
 sns.set()
@@ -42,6 +43,8 @@ Usage: jmaster (keys) --models (list of model YAML files)
             Operator which will be applicable to the columns in --ts mode
             Default: multiplication
             Possible options: multiply, plus, minus, divide
+        --split float
+            Define test/train split ratio
         --help
             Display help
 
@@ -183,6 +186,19 @@ def _load_vars_from_model(namespace, model, vars):
         vars[_key] = _expression(_value, vars)
     _lispex(model['model']['post_func'], vars)
 
+def _train_test_split(namespace, fname, data):
+    tts = dpath.util.get(namespace, "/config/train_test_split")
+    _fname = os.path.splitext(fname)[0]
+    _fname_test = "{}_test.csv".format(_fname)
+    _fname_train = "{}_train.csv".format(_fname)
+    train, test = train_test_split(data, test_size=tts)
+    print("Saving training: ", colored.green(_fname_train))
+    train.to_csv(_fname_train, index=False)
+    print("Saving testing: ", colored.green(_fname_train))
+    test.to_csv(_fname_test, index=False)
+
+
+
 def help(namespace, param):
     from pygments.formatters import TerminalFormatter
     from pygments import highlight
@@ -201,6 +217,14 @@ def output(namespace, param):
     except IndexError:
         return namespace
     print("Set output file: ", colored.magenta(param[0]))
+    return namespace
+
+def split(namespace, param):
+    try:
+        dpath.util.set(namespace, "/config/train_test_split", float(param[0]))
+    except IndexError:
+        return namespace
+    print("Set train/test split to: ", colored.magenta(param[0]))
     return namespace
 
 def oexp(namespace, param):
@@ -256,6 +280,7 @@ def tsmodel(namespace, params):
                 data.to_csv(_current_fname, index=False)
                 _mk_heatmap(namespace, _current_fname, data)
                 print("Saving",colored.green(_current_fname))
+                _train_test_split(namespace, _current_fname, data)
         c += 1
     return namespace
 
@@ -312,6 +337,7 @@ def model(namespace, models):
             print(colored.white("Save {}".format(model['fname'])))
             data.to_csv(model['fname'], index=False)
             _mk_heatmap(namespace, model['fname'], data)
+            _train_test_split(namespace, model['fname'], data)
         except IOError:
             print(colored.red("Can not save {}".format(model['fname'])))
     return namespace
@@ -351,12 +377,15 @@ def main():
     dpath.util.new(namespace, "/config/output", "output.csv")
     dpath.util.new(namespace, "/config/output_exp", [])
     dpath.util.new(namespace, "/config/op", 'multiply')
+    dpath.util.new(namespace, "/config/train_test_split", 0.2)
     dpath.util.new(namespace, "/models", {})
     dpath.util.new(namespace, "/generated", {})
     dpath.util.new(namespace, "/bin/help", help)
     dpath.util.new(namespace, "/bin/exp", exp)
     dpath.util.new(namespace, "/bin/output", output)
     dpath.util.new(namespace, "/bin/oexp", oexp)
+    dpath.util.new(namespace, "/bin/oexp", oexp)
+    dpath.util.new(namespace, "/bin/split", split)
     dpath.util.new(namespace, "/sbin/model", model)
     dpath.util.new(namespace, "/sbin/ts", tsmodel)
     dpath.util.new(namespace, "/sbin/op", {'multiply':np.multiply, 'plus': np.add, 'minus':np.subtract, 'divide': np.divide})
