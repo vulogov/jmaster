@@ -24,6 +24,7 @@ from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 import seaborn as sns
 import matplotlib.pyplot as plt
+from scipy import signal
 sns.set()
 
 HELP="""
@@ -130,6 +131,10 @@ def _anexpression(_exp, _fun, variables={}):
         return None
 
 def _expression(_exp, variables={}):
+    def _gauss(size, std):
+        return signal.gaussian(size, std=std)
+    def asint(data):
+        return data.astype(int)
     functions = {
         'int': np.int,
         'odd': lambda x: True if x % 2 == 0 else False,
@@ -146,7 +151,9 @@ def _expression(_exp, variables={}):
         'random_normal': np.random.normal,
         'random_uniform': np.random.uniform,
         'random_int': np.random.randint,
-        'normalize': lambda x: x / np.linalg.norm(x)
+        'normalize': lambda x: x / np.linalg.norm(x),
+        'gauss': _gauss,
+        'asint': asint
     }
     return _anexpression(_exp, functions, variables)
 
@@ -169,6 +176,10 @@ def _outexpression(_exp, variables):
     return res
 
 def _mk_heatmap(namespace, fname, data):
+    x_size, y_size = data.shape
+    if x_size > 20 or y_size > 20:
+        print("Dataset too big for plotting.", colored.red(data.shape))
+        return
     data.reset_index(inplace=True, drop=True)
     plot = sns.heatmap(data, annot=True, linewidths=.5, cmap="coolwarm", fmt=".1f")
     png_fname = os.path.splitext(fname)[0]+'.png'

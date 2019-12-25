@@ -6,9 +6,10 @@ model:
     - sampleSize: int(400)
     - a: "abs(random_normal(0, 255, sampleSize))"
     - b: "abs(random_normal(2, 5, sampleSize))"
+    - c: gauss(sampleSize, 28)
   attrs:
-    - a: "a / abs(sin(random_normal(0, 4.0, sampleSize)))"
-  y: abs(random_int(0, 3, sampleSize))
+    - a: c
+  y: "asint(abs(random_normal(0, 1, sampleSize)))"
   keras:
     epochs: 20
     layers:
