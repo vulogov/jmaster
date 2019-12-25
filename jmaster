@@ -131,7 +131,7 @@ def _anexpression(_exp, _fun, variables={}):
 
 def _expression(_exp, variables={}):
     functions = {
-        'int': int,
+        'int': np.int,
         'odd': lambda x: True if x % 2 == 0 else False,
         'even': lambda x: True if x % 2 == 1 else False,
         'div2': lambda x: x % 2,
@@ -145,6 +145,7 @@ def _expression(_exp, variables={}):
         'sqrt':np.sqrt,
         'random_normal': np.random.normal,
         'random_uniform': np.random.uniform,
+        'random_int': np.random.randint,
         'normalize': lambda x: x / np.linalg.norm(x)
     }
     return _anexpression(_exp, functions, variables)
@@ -216,18 +217,30 @@ def _train_keras(namespace, model, fname, data):
     model = Sequential()
     ln = 0
     isOK = True
+    lastLayer = None
+    y_train = to_categorical(y_train)
+    y_test = to_categorical(y_test)
+    if y_train.shape[1] != y_test.shape[1]:
+        print("Error building Keras ML Y(train) and Y(test) shape not matching: ", colored.red(y_train.shape), colored.red(y_test.shape))
+        return namespace
     for layer in layers:
         ld = l[layer]
         lv = {}
+        lastLayer = lv
         for k in ld:
             _k = list(k.keys())[0]
             _v = k[_k]
             lv[_k] = _v
         if lv.get('type', 'Dense') == 'Dense':
+            layer_size = lv.get('n', None)
+            if layer_size is None:
+                layer_size = y_test.shape[1]
+                lv['n'] = layer_size
+                print("Set layer output size: ", colored.magenta(layer_size), colored.magenta(y_test.shape))
             if ln == 0:
                 model.add(Dense(lv.get('n', 100), activation=lv.get('activation', 'relu'), input_dim=len(predictors)))
             else:
-                model.add(Dense(lv.get('n', 100), activation=lv.get('activation', 'relu')))
+                model.add(Dense(layer_size, activation=lv.get('activation', 'relu')))
         else:
             print("Error building Keras ML. Unknown layer type: ", colored.red(lv.get('type', 'Dense')))
             isOK = False
@@ -236,10 +249,12 @@ def _train_keras(namespace, model, fname, data):
     if isOK is not True:
         print(colored.red("Building KERAS model unsuccesful"))
         return namespace
-    y_train = to_categorical(y_train)
-    y_test = to_categorical(y_test)
     count_classes = y_test.shape[1]
     print("Number of the target classes: ", colored.magenta(count_classes))
+    print("Last layer output: ", colored.magenta(lastLayer.get("n", 0)))
+    if count_classes != lastLayer.get("n", 0):
+        print("Number of the target classes doesn't match with Y size: ", colored.red(y_test.shape[1], lastLayer.get("n", 0)))
+        return namespace
     compile_opt = {}
     for k in keras_model.get("compile", {}):
         _k = list(k.keys())[0]

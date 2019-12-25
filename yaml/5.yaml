@@ -3,29 +3,29 @@ model:
   name: "Test model #5 playing with Keras"
   fname: test_5.csv
   variables:
-    - a: "abs(random_uniform(0, 255, 10))"
-    - b: "abs(random_uniform(2, 5, 10))"
+    - sampleSize: int(400)
+    - a: "abs(random_normal(0, 255, sampleSize))"
+    - b: "abs(random_normal(2, 5, sampleSize))"
   attrs:
-    - a: "a / abs(random_uniform(0, 255, 10))"
-  y: abs(random_uniform(0, 2, 10))
+    - a: "a / abs(sin(random_normal(0, 4.0, sampleSize)))"
+  y: abs(random_int(0, 3, sampleSize))
   keras:
     epochs: 20
     layers:
       0:
         - type: Dense
-        - n: 500
+        - n: 200
         - activation: relu
       1:
         - type: Dense
-        - n: 250
+        - n: 100
         - activation: relu
       2:
         - type: Dense
-        - n: 10
+        - n: 5
         - activation: relu
       3:
         - type: Dense
-        - n: 2
         - activation: softmax
     compile:
       - optimizer: adam
